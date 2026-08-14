@@ -8,6 +8,11 @@
 language: ru
 
 reviews:
+  # Off: status-only comments ("Review skipped", "Currently processing new changes")
+  # are posted on every push and each one triggers a notification email while
+  # reporting nothing of substance. Actual review findings are unaffected.
+  review_status: false
+
   # Explicit `@coderabbitai review` comments still work with this off.
   auto_review:
     enabled: false

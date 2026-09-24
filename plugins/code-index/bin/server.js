@@ -460,7 +460,7 @@ async function checkOllama(env, serverDir, deps = {}) {
 //   none is sent, and anonymous access (subject to GitHub's normal
 //   unauthenticated rate limit) just works.
 
-const RELEASE_OWNER = 'StaticBit-io';
+const RELEASE_OWNER = 'Platonenkov';
 const RELEASE_REPO = 'code-index-mcp';
 const GITHUB_API_BASE = 'https://api.github.com';
 const GITHUB_ISSUES_URL = `https://github.com/${RELEASE_OWNER}/${RELEASE_REPO}/issues`;
@@ -673,27 +673,50 @@ function logDownloadProgress(received, total) {
   }
 }
 
-/** Downloads a release asset by its GitHub API asset id. Fetches the asset
- * endpoint with `redirect: 'manual'` and, if GitHub answers with a redirect
- * to a pre-signed storage URL (the common case for anything but tiny
- * assets), follows it in a *separate* unauthenticated request. Blob storage
- * behind a pre-signed URL commonly rejects a request that carries both a
- * signature in the query string and an Authorization header — sending our
- * GitHub token along on the redirect would break exactly the private-repo
- * case it's meant to support. */
+const MAX_ASSET_REDIRECTS = 5;
+
+/** How to follow one redirect from the asset endpoint. A redirect that stays
+ * on api.github.com is GitHub moving the endpoint itself — a transferred or
+ * renamed repository answers 301 to its new URL — so it is re-requested
+ * exactly like the original: same Accept header (without
+ * `application/octet-stream` the API returns the asset's JSON metadata
+ * instead of its bytes), same token, still `redirect: 'manual'`. Any other
+ * host is the pre-signed storage URL, fetched without the token: blob storage
+ * commonly rejects a request that carries both a signature in the query
+ * string and an Authorization header, which would break exactly the
+ * private-repo case the token exists for. */
+function assetRedirectRequest(location, token) {
+  const target = new URL(location);
+  if (target.origin === new URL(GITHUB_API_BASE).origin) {
+    return {
+      url: target.toString(),
+      options: { redirect: 'manual', headers: buildGithubHeaders(token, 'application/octet-stream') },
+    };
+  }
+  return { url: target.toString(), options: { redirect: 'follow' } };
+}
+
+/** Downloads a release asset by its GitHub API asset id, following redirects
+ * one hop at a time through assetRedirectRequest (see there for why each hop
+ * is handled differently) up to MAX_ASSET_REDIRECTS. */
 async function downloadAssetBuffer(assetId, token, expectedSize) {
-  const assetUrl = `${GITHUB_API_BASE}/repos/${RELEASE_OWNER}/${RELEASE_REPO}/releases/assets/${assetId}`;
+  let url = `${GITHUB_API_BASE}/repos/${RELEASE_OWNER}/${RELEASE_REPO}/releases/assets/${assetId}`;
 
   let response = await fetchWithAbort(
-    assetUrl,
+    url,
     { redirect: 'manual', headers: buildGithubHeaders(token, 'application/octet-stream') },
     DOWNLOAD_TIMEOUT_MS,
   );
 
-  if (response.status >= 300 && response.status < 400) {
+  for (let hops = 0; response.status >= 300 && response.status < 400; hops++) {
+    if (hops >= MAX_ASSET_REDIRECTS) {
+      throw new HttpStatusError(response.status, `more than ${MAX_ASSET_REDIRECTS} redirects fetching the release asset`);
+    }
     const location = response.headers.get('location');
     if (!location) throw new HttpStatusError(response.status, 'redirect response with no Location header');
-    response = await fetchWithAbort(location, { redirect: 'follow' }, DOWNLOAD_TIMEOUT_MS);
+    const next = assetRedirectRequest(new URL(location, url), token);
+    url = next.url;
+    response = await fetchWithAbort(next.url, next.options, DOWNLOAD_TIMEOUT_MS);
   }
 
   if (!response.ok) {
@@ -1129,6 +1152,7 @@ module.exports = {
   extractEntriesTo,
   readCString,
   buildGithubHeaders,
+  downloadAssetBuffer,
   LauncherExit,
   NetworkError,
   HttpStatusError,

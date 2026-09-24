@@ -29,7 +29,7 @@ C#-репозиториям. Запускает `CodeIndex.Server.dll` под **
 ## Установка
 
 ```text
-/plugin marketplace add StaticBit-io/code-index-mcp
+/plugin marketplace add Platonenkov/code-index-mcp
 /plugin install code-index@code-index-mcp
 ```
 
@@ -198,7 +198,7 @@ endpoint или модель Ollama без правки файла.
 Репозиторий плагина **не** хранит собранный сервер — это ~14 МБ преимущественно бинарного
 артефакта, который не дельта-сжимается в git, так что коммит этого файла на каждый релиз навсегда
 увеличивал бы репозиторий. Вместо этого `bin/server.js` при первом использовании скачивает его из
-[GitHub Release](https://github.com/StaticBit-io/code-index-mcp/releases) и кэширует локально:
+[GitHub Release](https://github.com/Platonenkov/code-index-mcp/releases) и кэширует локально:
 
 1. Лаунчер читает поле `serverVersion` из собственного манифеста плагина (`.claude-plugin/plugin.json`
    — оно намеренно отделено от `version` самого плагина: релиз плагина, где меняются только скилл
@@ -240,7 +240,7 @@ endpoint или модель Ollama без правки файла.
 [code-index] Check your internet connection and try again. If you are offline, download the release
 [code-index] manually and extract it into the folder below:
 
-  https://github.com/StaticBit-io/code-index-mcp/releases/download/server-v0.2.2/code-index-server-0.2.2.tar.gz
+  https://github.com/Platonenkov/code-index-mcp/releases/download/server-v0.2.2/code-index-server-0.2.2.tar.gz
 
   C:\Users\you\.code-index-mcp\server\0.2.2\
 
@@ -257,7 +257,7 @@ endpoint или модель Ollama без правки файла.
 [code-index] This usually means a corrupted download or a compromised release asset. The file was
 [code-index] not installed. Try again; if this keeps happening, please report it:
 
-  https://github.com/StaticBit-io/code-index-mcp/issues
+  https://github.com/Platonenkov/code-index-mcp/issues
 ```
 
 **Релиз для этой версии плагина не опубликован:**
@@ -265,10 +265,10 @@ endpoint или модель Ollama без правки файла.
 [code-index] No GitHub release found for server v0.2.2 (tag server-v0.2.2).
 
 [code-index] This plugin build expects a matching server release that is not published — check
-[code-index]   https://github.com/StaticBit-io/code-index-mcp/releases
+[code-index]   https://github.com/Platonenkov/code-index-mcp/releases
 [code-index] for available versions, or download it manually once published:
 
-  https://github.com/StaticBit-io/code-index-mcp/releases/download/server-v0.2.2/code-index-server-0.2.2.tar.gz
+  https://github.com/Platonenkov/code-index-mcp/releases/download/server-v0.2.2/code-index-server-0.2.2.tar.gz
 ```
 
 **Приватный репозиторий, нет доступных учётных данных** (сегодня репозиторий приватный; тот же
@@ -285,7 +285,7 @@ endpoint или модель Ollama без правки файла.
 
   C:\Users\you\.code-index-mcp\server\0.2.2\
 
-  https://github.com/StaticBit-io/code-index-mcp/releases/download/server-v0.2.2/code-index-server-0.2.2.tar.gz
+  https://github.com/Platonenkov/code-index-mcp/releases/download/server-v0.2.2/code-index-server-0.2.2.tar.gz
 ```
 
 Сами сообщения лаунчер печатает на английском (это вывод инструмента, не документация) — здесь

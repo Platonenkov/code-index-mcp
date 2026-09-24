@@ -79,6 +79,36 @@ jobs:
 
           exit "${status}"
 
+  # The plugin launcher (plugins/code-index/bin/server.js) runs on every user's
+  # machine before the .NET server starts, and its unit tests guard failures that
+  # would otherwise only show up there: the Ollama wait and degraded start, the
+  # handling of unset ${VAR} placeholders, zip-slip checks in tar extraction,
+  # checksum parsing, and the no-raw-process.exit() invariant. The tests use only
+  # the built-in node:test runner, so there is no npm install step. Runs on
+  # Windows as well because that is where the launcher is used most, and it needs
+  # no .NET SDK, so it stays a separate, cheap job.
+  launcher-tests:
+    name: Launcher tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Test launcher
+        shell: bash
+        run: node --test plugins/code-index/bin/server.test.js
+
   build-and-test:
     name: Build & Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

@@ -2,7 +2,9 @@
 
 All notable changes to this plugin are listed here. Newest at the top.
 
-## Unreleased
+## v0.2.5 — 2026-09-24
+
+Ships server **v0.2.2** (unchanged — launcher-only release; no new server download).
 
 ### Fixes
 - **A session resumed right after login no longer ends up without a code-index server.** The Claude

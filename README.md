@@ -1,6 +1,6 @@
 # code-index-mcp
 
-[![CI](https://github.com/StaticBit-io/code-index-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/StaticBit-io/code-index-mcp/actions/workflows/ci.yml)
+[![CI](https://github.com/Platonenkov/code-index-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Platonenkov/code-index-mcp/actions/workflows/ci.yml)
 
 A local MCP (Model Context Protocol) server that gives Claude Code semantic search over one or
 more C# codebases, backed by a vector index built from locally computed embeddings. It exposes
@@ -57,7 +57,7 @@ locally after that — see
 [How the server binary is fetched](plugins/code-index/README.md#how-the-server-binary-is-fetched)):
 
 ```text
-/plugin marketplace add StaticBit-io/code-index-mcp
+/plugin marketplace add Platonenkov/code-index-mcp
 /plugin install code-index@code-index-mcp
 ```
 

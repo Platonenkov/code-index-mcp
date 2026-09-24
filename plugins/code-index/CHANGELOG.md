@@ -2,6 +2,30 @@
 
 All notable changes to this plugin are listed here. Newest at the top.
 
+## Unreleased
+
+### Changes
+- **The repository moved from `StaticBit-io/code-index-mcp` to `Platonenkov/code-index-mcp`.** The
+  launcher's release owner, the manifests' `homepage`/`author`, and every install and download link
+  in the READMEs now point at the new location. Existing installs keep working through GitHub's
+  redirects; re-point a locally added marketplace with
+  `/plugin marketplace add Platonenkov/code-index-mcp` at your convenience.
+
+### Fixes
+- **Fresh installs broke as soon as the repository was transferred.** The launcher downloads the
+  server via the GitHub API asset endpoint with `redirect: 'manual'` and treated *any* redirect as
+  the hop to pre-signed blob storage, following it without the token and without
+  `Accept: application/octet-stream`. After a transfer, the old-owner endpoint first answers
+  **301 to the repository's new API URL**, and requesting that without the octet-stream `Accept`
+  header returns the asset's JSON metadata instead of the archive. The checksum check then refused
+  it ("checksum does not match"), so every machine without a cached server failed to install.
+  Machines that already had `~/.code-index-mcp/server/<version>/` were unaffected.
+  - Redirects that stay on `api.github.com` are now re-requested exactly like the original request
+    (same `Accept` header and token, still `redirect: 'manual'`). Only a redirect to another host,
+    the pre-signed storage URL, is fetched without the token. The launcher follows at most 5 hops.
+  - Verified on a clean cache: the fixed launcher installs server v0.2.2 both with the new owner and
+    with the old owner forced back into the code, which simulates the next transfer or rename.
+
 ## v0.2.5 — 2026-09-24
 
 Ships server **v0.2.2** (unchanged — launcher-only release; no new server download).

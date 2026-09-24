@@ -33,7 +33,7 @@ launcher checks all of them before starting the server and tells you exactly wha
 ## Install
 
 ```text
-/plugin marketplace add StaticBit-io/code-index-mcp
+/plugin marketplace add Platonenkov/code-index-mcp
 /plugin install code-index@code-index-mcp
 ```
 
@@ -194,7 +194,7 @@ skill for what a stale-index warning means and why the hits are still usable.
 The plugin repository does **not** carry the published server build — it's a ~14 MB, mostly
 binary artifact that doesn't delta-compress in git, so committing it on every release would grow
 the repository forever. Instead `bin/server.js` fetches it from a
-[GitHub Release](https://github.com/StaticBit-io/code-index-mcp/releases) on first use and caches
+[GitHub Release](https://github.com/Platonenkov/code-index-mcp/releases) on first use and caches
 it locally:
 
 1. The launcher reads `serverVersion` from the plugin's own manifest (`.claude-plugin/plugin.json`
@@ -237,7 +237,7 @@ This is a development escape hatch, not something to set for normal use.
 [code-index] Check your internet connection and try again. If you are offline, download the release
 [code-index] manually and extract it into the folder below:
 
-  https://github.com/StaticBit-io/code-index-mcp/releases/download/server-v0.2.2/code-index-server-0.2.2.tar.gz
+  https://github.com/Platonenkov/code-index-mcp/releases/download/server-v0.2.2/code-index-server-0.2.2.tar.gz
 
   C:\Users\you\.code-index-mcp\server\0.2.2\
 
@@ -253,7 +253,7 @@ This is a development escape hatch, not something to set for normal use.
 [code-index] This usually means a corrupted download or a compromised release asset. The file was
 [code-index] not installed. Try again; if this keeps happening, please report it:
 
-  https://github.com/StaticBit-io/code-index-mcp/issues
+  https://github.com/Platonenkov/code-index-mcp/issues
 ```
 
 **Release asset not published for this plugin version:**
@@ -261,10 +261,10 @@ This is a development escape hatch, not something to set for normal use.
 [code-index] No GitHub release found for server v0.2.2 (tag server-v0.2.2).
 
 [code-index] This plugin build expects a matching server release that is not published — check
-[code-index]   https://github.com/StaticBit-io/code-index-mcp/releases
+[code-index]   https://github.com/Platonenkov/code-index-mcp/releases
 [code-index] for available versions, or download it manually once published:
 
-  https://github.com/StaticBit-io/code-index-mcp/releases/download/server-v0.2.2/code-index-server-0.2.2.tar.gz
+  https://github.com/Platonenkov/code-index-mcp/releases/download/server-v0.2.2/code-index-server-0.2.2.tar.gz
 ```
 
 **Private repository, no credentials available** (this repository is private today; the same code
@@ -281,7 +281,7 @@ path works unchanged, with no token needed, if it ever becomes public):
 
   C:\Users\you\.code-index-mcp\server\0.2.2\
 
-  https://github.com/StaticBit-io/code-index-mcp/releases/download/server-v0.2.2/code-index-server-0.2.2.tar.gz
+  https://github.com/Platonenkov/code-index-mcp/releases/download/server-v0.2.2/code-index-server-0.2.2.tar.gz
 ```
 
 ### Concurrent installs

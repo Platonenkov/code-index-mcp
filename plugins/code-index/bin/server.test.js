@@ -543,6 +543,88 @@ function withTempEnv(t, vars) {
   });
 }
 
+/** Replaces the global fetch for one test with a router keyed by URL, recording every request. */
+function stubGlobalFetch(t, route) {
+  const original = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const headers = options.headers || {};
+    requests.push({ url: String(url), redirect: options.redirect, accept: headers.Accept, auth: headers.Authorization });
+    return route(String(url), headers);
+  };
+  t.after(() => {
+    globalThis.fetch = original;
+  });
+  return requests;
+}
+
+function redirectTo(location, status = 302) {
+  return new Response(null, { status, headers: { location } });
+}
+
+test('downloadAssetBuffer survives a repository transfer: a 301 to another API URL is re-requested with the octet-stream Accept header', async (t) => {
+  // After a GitHub repo transfer/rename, the old-owner asset endpoint answers 301 to a new
+  // api.github.com URL instead of 302 to blob storage. Following that 301 as if it were the
+  // storage hop (no Accept: application/octet-stream) returns the asset's JSON metadata, which
+  // then fails the checksum — every fresh install broke this way once the repo moved.
+  const payload = Buffer.from('real archive bytes');
+  const storage = 'https://release-assets.example.test/blob?sig=abc';
+  const requests = stubGlobalFetch(t, (url, headers) => {
+    if (url.endsWith(`/repos/${srv.RELEASE_OWNER}/${srv.RELEASE_REPO}/releases/assets/7`)) {
+      return redirectTo('https://api.github.com/repositories/1/releases/assets/7', 301);
+    }
+    if (url === 'https://api.github.com/repositories/1/releases/assets/7') {
+      return headers.Accept === 'application/octet-stream'
+        ? redirectTo(storage)
+        : new Response(JSON.stringify({ id: 7, name: 'metadata, not the archive' }), { status: 200 });
+    }
+    if (url === storage) return new Response(payload, { status: 200 });
+    return new Response('unexpected url', { status: 404 });
+  });
+
+  const buffer = await srv.downloadAssetBuffer(7, 'tok', payload.length);
+
+  assert.deepEqual(buffer, payload);
+  const [first, moved, blob] = requests;
+  assert.equal(moved.accept, 'application/octet-stream', 'the moved API URL keeps the octet-stream Accept header');
+  assert.equal(moved.auth, 'Bearer tok', 'the moved API URL is still GitHub, so the token goes along');
+  assert.equal(moved.redirect, 'manual');
+  assert.equal(first.auth, 'Bearer tok');
+  assert.equal(blob.auth, undefined, 'the pre-signed storage URL never receives the GitHub token');
+});
+
+test('downloadAssetBuffer still follows the ordinary single storage redirect without the token', async (t) => {
+  const payload = Buffer.from('bytes');
+  const storage = 'https://release-assets.example.test/blob?sig=xyz';
+  const requests = stubGlobalFetch(t, (url) =>
+    url === storage ? new Response(payload, { status: 200 }) : redirectTo(storage),
+  );
+
+  assert.deepEqual(await srv.downloadAssetBuffer(9, 'tok', payload.length), payload);
+  assert.equal(requests.length, 2);
+  assert.equal(requests[1].auth, undefined);
+});
+
+test('downloadAssetBuffer gives up on a redirect loop instead of spinning forever', async (t) => {
+  stubGlobalFetch(t, () => redirectTo('https://api.github.com/repositories/1/releases/assets/7', 301));
+
+  await assert.rejects(srv.downloadAssetBuffer(7, undefined, 0), (err) => err instanceof srv.HttpStatusError);
+});
+
+test('RELEASE_OWNER/RELEASE_REPO point at the repository the manifests name as homepage', () => {
+  // The launcher downloads the server from this repository's releases; the manifests are what
+  // a person reads. A transfer that updates one but not the other leaves them disagreeing.
+  const expected = `https://github.com/${srv.RELEASE_OWNER}/${srv.RELEASE_REPO}`;
+  const plugin = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '.claude-plugin', 'plugin.json'), 'utf8'));
+  const marketplace = JSON.parse(
+    fs.readFileSync(path.join(__dirname, '..', '..', '..', '.claude-plugin', 'marketplace.json'), 'utf8'),
+  );
+  const entry = marketplace.plugins.find((p) => p.name === 'code-index');
+
+  assert.equal(plugin.homepage, expected);
+  assert.equal(entry.homepage, expected);
+});
+
 /** A deterministic stand-in for the clock, sleep, fetch and log that waitForOllama/checkOllama
  * take as injectable dependencies: `sleep` advances the fake clock instantly instead of waiting,
  * and `fetchImpl` answers each probe from `script` in order (an Error entry is thrown, anything

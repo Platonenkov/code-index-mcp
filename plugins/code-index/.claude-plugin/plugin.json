@@ -4,10 +4,10 @@
   "version": "0.2.5",
   "serverVersion": "0.2.2",
   "author": {
-    "name": "StaticBit",
-    "url": "https://github.com/StaticBit-io"
+    "name": "Aleksandr Platonenkov",
+    "url": "https://github.com/Platonenkov"
   },
-  "homepage": "https://github.com/StaticBit-io/code-index-mcp",
+  "homepage": "https://github.com/Platonenkov/code-index-mcp",
   "license": "MIT",
   "keywords": [
     "csharp",

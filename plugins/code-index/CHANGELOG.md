@@ -2,7 +2,9 @@
 
 All notable changes to this plugin are listed here. Newest at the top.
 
-## Unreleased
+## v0.2.6 — 2026-09-24
+
+Ships server **v0.2.2** (unchanged — launcher, manifests and docs only; no new server download).
 
 ### Changes
 - **The repository moved from `StaticBit-io/code-index-mcp` to `Platonenkov/code-index-mcp`.** The

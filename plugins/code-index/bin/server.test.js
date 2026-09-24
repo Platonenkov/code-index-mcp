@@ -543,6 +543,156 @@ function withTempEnv(t, vars) {
   });
 }
 
+/** A deterministic stand-in for the clock, sleep, fetch and log that waitForOllama/checkOllama
+ * take as injectable dependencies: `sleep` advances the fake clock instantly instead of waiting,
+ * and `fetchImpl` answers each probe from `script` in order (an Error entry is thrown, anything
+ * else is returned as the response), repeating the last entry once the script runs out. */
+function fakeOllamaDeps(script, overrides = {}) {
+  const calls = { fetches: [], sleeps: [], logs: [] };
+  let clock = 0;
+  let index = 0;
+  const deps = {
+    now: () => clock,
+    sleep: async (ms) => {
+      calls.sleeps.push(ms);
+      clock += ms;
+    },
+    fetchImpl: async (url, options) => {
+      calls.fetches.push({ url, timeoutMs: options.timeoutMs, at: clock });
+      const step = script[Math.min(index, script.length - 1)];
+      index += 1;
+      if (step instanceof Error) {
+        // `hangs`: the probe runs into its own timeout instead of being refused at once.
+        if (overrides.hangs) clock += options.timeoutMs;
+        throw step;
+      }
+      return step;
+    },
+    log: (...lines) => calls.logs.push(...lines),
+    waitTimeoutMs: 20000,
+    retryIntervalMs: 1000,
+    probeTimeoutMs: 5000,
+    ...overrides,
+  };
+  return { deps, calls };
+}
+
+function tagsResponse(models, { ok = true, status = 200, statusText = 'OK' } = {}) {
+  return { ok, status, statusText, json: async () => ({ models }) };
+}
+
+const REFUSED = () => Object.assign(new Error('fetch failed'), { cause: { code: 'ECONNREFUSED' } });
+
+const OLLAMA_ENV = {
+  CODEINDEX_Embedding__Endpoint: 'http://localhost:11434',
+  CODEINDEX_Embedding__Model: 'qwen3-embedding:4b',
+};
+
+test('waitForOllama: a reachable Ollama is probed exactly once, with no sleep and no log', async () => {
+  const response = tagsResponse([]);
+  const { deps, calls } = fakeOllamaDeps([response]);
+
+  const result = await srv.waitForOllama('http://localhost:11434/api/tags', deps);
+
+  assert.equal(result, response);
+  assert.equal(calls.fetches.length, 1);
+  assert.deepEqual(calls.sleeps, []);
+  assert.deepEqual(calls.logs, []);
+});
+
+test('waitForOllama: keeps retrying while Ollama is still starting and returns once it answers', async () => {
+  const response = tagsResponse([]);
+  const { deps, calls } = fakeOllamaDeps([REFUSED(), REFUSED(), REFUSED(), response]);
+
+  const result = await srv.waitForOllama('http://localhost:11434/api/tags', deps);
+
+  assert.equal(result, response);
+  assert.equal(calls.fetches.length, 4);
+  assert.deepEqual(calls.sleeps, [1000, 1000, 1000]);
+  assert.equal(
+    calls.logs.filter((line) => line.includes('not reachable yet')).length,
+    1,
+    'the "waiting" notice is logged once, not once per attempt',
+  );
+});
+
+test('waitForOllama: gives up with the last error once the wait budget is spent, never overshooting it', async () => {
+  const { deps, calls } = fakeOllamaDeps([REFUSED()]);
+
+  await assert.rejects(srv.waitForOllama('http://localhost:11434/api/tags', deps), /fetch failed/);
+
+  const lastFetch = calls.fetches[calls.fetches.length - 1];
+  assert.ok(lastFetch.at <= 20000, `last probe started at ${lastFetch.at} ms, past the 20000 ms budget`);
+  assert.ok(calls.fetches.length >= 20, `expected ~21 probes across a 20 s budget, got ${calls.fetches.length}`);
+  const slept = calls.sleeps.reduce((sum, ms) => sum + ms, 0);
+  assert.ok(slept <= 20000, `slept ${slept} ms in total, past the 20000 ms budget`);
+});
+
+test('waitForOllama: a probe never gets a timeout longer than what is left of the wait budget', async () => {
+  // A black-holed endpoint (probe hangs until its own timeout) must not push the total wait past
+  // the budget: the per-probe timeout is clamped to the remaining time, so the launcher still
+  // finishes well inside Claude Code's 30 s MCP connection timeout.
+  const { deps, calls } = fakeOllamaDeps([REFUSED()], {
+    hangs: true,
+    waitTimeoutMs: 7000,
+    retryIntervalMs: 1000,
+    probeTimeoutMs: 5000,
+  });
+
+  await assert.rejects(srv.waitForOllama('http://localhost:11434/api/tags', deps));
+
+  assert.deepEqual(
+    calls.fetches.map((f) => [f.at, f.timeoutMs]),
+    [
+      [0, 5000], // full probe timeout, 7000 ms of budget left
+      [6000, 1000], // clamped: only 1000 ms of budget left after the 1000 ms pause
+    ],
+  );
+  const last = calls.fetches[calls.fetches.length - 1];
+  assert.ok(last.at + last.timeoutMs <= 7000, 'the whole wait, hung probes included, stays inside the budget');
+});
+
+test('waitForOllama defaults stay inside Claude Code\'s 30 s MCP connection timeout', () => {
+  assert.ok(srv.OLLAMA_WAIT_TIMEOUT_MS <= 20000, 'leave headroom for the dotnet runtime check and server startup');
+  assert.ok(srv.OLLAMA_RETRY_INTERVAL_MS > 0 && srv.OLLAMA_RETRY_INTERVAL_MS < srv.OLLAMA_WAIT_TIMEOUT_MS);
+});
+
+test('checkOllama: Ollama that comes up during the wait, with the model pulled, is READY', async (t) => {
+  const serverDir = mkTempDir(t, 'code-index-ollama-ready-');
+  const { deps } = fakeOllamaDeps([REFUSED(), REFUSED(), tagsResponse([{ name: 'qwen3-embedding:4b' }])]);
+
+  assert.equal(await srv.checkOllama(OLLAMA_ENV, serverDir, deps), srv.OLLAMA_READY);
+});
+
+test('checkOllama: Ollama still unreachable after the whole wait is UNREACHABLE (start degraded), not a hard failure', async (t) => {
+  const serverDir = mkTempDir(t, 'code-index-ollama-down-');
+  const { deps, calls } = fakeOllamaDeps([REFUSED()]);
+
+  assert.equal(await srv.checkOllama(OLLAMA_ENV, serverDir, deps), srv.OLLAMA_UNREACHABLE);
+  const text = calls.logs.join('\n');
+  assert.match(text, /starting the server anyway/);
+  assert.match(text, /ollama serve/);
+});
+
+test('checkOllama: a model that is not pulled fails immediately, without waiting', async (t) => {
+  const serverDir = mkTempDir(t, 'code-index-ollama-nomodel-');
+  const { deps, calls } = fakeOllamaDeps([tagsResponse([{ name: 'some-other-model' }])]);
+
+  assert.equal(await srv.checkOllama(OLLAMA_ENV, serverDir, deps), srv.OLLAMA_FAILED);
+  assert.equal(calls.fetches.length, 1);
+  assert.deepEqual(calls.sleeps, []);
+  assert.match(calls.logs.join('\n'), /ollama pull qwen3-embedding:4b/);
+});
+
+test('checkOllama: an HTTP error from a reachable Ollama is not retried — it is a real failure, not a slow start', async (t) => {
+  const serverDir = mkTempDir(t, 'code-index-ollama-500-');
+  const { deps, calls } = fakeOllamaDeps([tagsResponse([], { ok: false, status: 500, statusText: 'Internal Server Error' })]);
+
+  assert.equal(await srv.checkOllama(OLLAMA_ENV, serverDir, deps), srv.OLLAMA_FAILED);
+  assert.equal(calls.fetches.length, 1);
+  assert.deepEqual(calls.sleeps, []);
+});
+
 /** Copies server.js into `binDir` (alongside the throwaway `.claude-plugin/plugin.json` the
  * caller already created) and requires that copy fresh — the same technique the
  * readExpectedChecksum tests above use. Needed anywhere a test wants to observe module-load-time

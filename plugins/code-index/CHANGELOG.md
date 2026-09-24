@@ -2,6 +2,27 @@
 
 All notable changes to this plugin are listed here. Newest at the top.
 
+## Unreleased
+
+### Fixes
+- **A session resumed right after login no longer ends up without a code-index server.** The Claude
+  Code desktop app resumes every open session as soon as it starts, often before Ollama's own
+  autostart has finished. The launcher probed Ollama once, failed on the spot, and Claude Code does
+  not retry a failed MCP connection, so that session had no code-index tools for its whole
+  lifetime. Measured on one machine: the launcher probed at 08:21:37 and gave up after 472 ms;
+  `ollama.exe` started at 08:22:15.
+  - The launcher now re-probes an unreachable Ollama once a second for up to 20 s. Each probe's
+    timeout is clamped to what is left of that budget, so the launcher still finishes inside Claude
+    Code's 30 s MCP connection timeout.
+  - Waiting alone would not have fixed the measured case, since Ollama came up 38 s later. If Ollama
+    is still unreachable once the wait is over, the launcher now **starts the server anyway**
+    instead of exiting. The server already runs without Ollama: symbol search over the existing
+    index, with a `warning` naming `ollama serve` on every response. It has no cached "unavailable"
+    state, so semantic ranking comes back with the first query after Ollama starts.
+  - Only a failure to connect is retried or tolerated. A reachable Ollama that answers with an HTTP
+    error or a malformed body, or that does not have the model pulled, still stops the launcher
+    immediately with the same messages as before. Waiting would not fix any of those.
+
 ## v0.2.4 — 2026-08-03
 
 Ships server **v0.2.2**.

@@ -151,17 +151,25 @@ endpoint или модель Ollama без правки файла.
 [code-index] Then restart Claude Code so the server picks up the new configuration.
 ```
 
-**Ollama не запущен:**
+**Ollama не запущен.** Этот случай запуск сервера не останавливает. Сразу после входа в систему
+десктоп-приложение Claude Code восстанавливает все открытые сессии, часто ещё до того, как
+завершился автозапуск самой Ollama. Поэтому лаунчер повторяет проверку до 20 секунд — это
+укладывается в 30-секундный таймаут подключения MCP в Claude Code:
 ```text
-[code-index] Cannot reach Ollama at http://localhost:11434.
+[code-index] Ollama is not reachable yet at http://localhost:11434 — waiting up to 20 s in case it is still starting...
+```
+Если Ollama так и не ответила, лаунчер всё равно запускает сервер, чтобы сессия не осталась без
+инструментов code-index вовсе:
+```text
+[code-index] Cannot reach Ollama at http://localhost:11434 — starting the server anyway.
 
-[code-index] code-index-mcp needs Ollama running locally to compute embeddings.
-[code-index] Start it with:
+[code-index] Symbol search works from the existing index; semantic ranking and re-indexing
+[code-index] resume on their own with the first query after Ollama comes up. Start it with:
 
   ollama serve
-
-[code-index] Then ask your question again.
 ```
+Пока Ollama не запущена, каждый ответ `code_search` содержит `warning` о том, что результаты —
+только совпадения по символам. После запуска Ollama ничего перезапускать не нужно.
 
 **Модель не скачана:**
 ```text

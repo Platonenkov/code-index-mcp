@@ -151,17 +151,25 @@ of these to stderr instead of a stack trace or a silent hang:
 [code-index] Then restart Claude Code so the server picks up the new configuration.
 ```
 
-**Ollama not running:**
+**Ollama not running.** This one does not stop the server. Right after login, the Claude Code
+desktop app resumes every open session, often before Ollama's own autostart has finished. So the
+launcher keeps probing for up to 20 seconds, which fits inside Claude Code's 30-second MCP
+connection timeout:
 ```text
-[code-index] Cannot reach Ollama at http://localhost:11434.
+[code-index] Ollama is not reachable yet at http://localhost:11434 — waiting up to 20 s in case it is still starting...
+```
+If Ollama is still unreachable after that, the launcher starts the server anyway rather than
+leaving the session with no code-index tools at all:
+```text
+[code-index] Cannot reach Ollama at http://localhost:11434 — starting the server anyway.
 
-[code-index] code-index-mcp needs Ollama running locally to compute embeddings.
-[code-index] Start it with:
+[code-index] Symbol search works from the existing index; semantic ranking and re-indexing
+[code-index] resume on their own with the first query after Ollama comes up. Start it with:
 
   ollama serve
-
-[code-index] Then ask your question again.
 ```
+Until Ollama is up, every `code_search` response carries a `warning` saying the results are symbol
+matches only. You do not need to restart anything once Ollama starts.
 
 **Model not pulled:**
 ```text

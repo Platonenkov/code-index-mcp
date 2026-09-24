@@ -86,6 +86,27 @@ const CONFIG_PATH = isUnsetOverrideValue(process.env.CODEINDEX_CONFIG_FILE)
 
 const OLLAMA_PROBE_TIMEOUT_MS = 5000;
 
+// How long the launcher keeps re-probing an Ollama it cannot reach yet. The
+// Claude Code desktop app resumes every open session right after login, often
+// before Ollama's own autostart has finished — measured on one machine: the
+// launcher probed at 08:21:37, ollama.exe started at 08:22:15. Failing on the
+// first probe left that session with no code-index server for its whole
+// lifetime, since Claude Code does not retry a failed MCP connection. 20 s
+// stays inside Claude Code's 30 s MCP connection timeout with headroom for the
+// dotnet runtime check before it and the server's own startup after it.
+const OLLAMA_WAIT_TIMEOUT_MS = 20000;
+const OLLAMA_RETRY_INTERVAL_MS = 1000;
+
+// checkOllama outcomes. UNREACHABLE is deliberately distinct from FAILED: an
+// Ollama that is merely not up yet is not a reason to refuse to start — the
+// server already runs without it (symbol search over the existing index, a
+// warning naming `ollama serve` on each response) and picks embeddings back up
+// on the first query after Ollama appears. FAILED covers problems that waiting
+// and retrying will not fix: a missing model, an HTTP error, a bad response.
+const OLLAMA_READY = 'ready';
+const OLLAMA_UNREACHABLE = 'unreachable';
+const OLLAMA_FAILED = 'failed';
+
 function logError(...lines) {
   for (const line of lines) console.error(line);
 }
@@ -287,9 +308,10 @@ function checkProjectConfigured(env) {
 
 // ── 2/3. Ollama reachable + model pulled ─────────────────────────────────────
 
-async function fetchWithTimeout(url, timeoutMs) {
+/** The default `fetchImpl` for waitForOllama: a plain fetch aborted after `options.timeoutMs`. */
+async function fetchWithTimeout(url, options) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs);
   try {
     return await fetch(url, { signal: controller.signal });
   } finally {
@@ -297,49 +319,97 @@ async function fetchWithTimeout(url, timeoutMs) {
   }
 }
 
-async function checkOllama(env, serverDir) {
+/** Real-time implementations of everything waitForOllama/checkOllama take as
+ * injectable dependencies; server.test.js substitutes a fake clock, an
+ * instant sleep and a scripted fetch so the retry loop is tested without
+ * waiting or touching the network. */
+const DEFAULT_OLLAMA_DEPS = {
+  fetchImpl: fetchWithTimeout,
+  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  now: () => Date.now(),
+  log: logError,
+  waitTimeoutMs: OLLAMA_WAIT_TIMEOUT_MS,
+  retryIntervalMs: OLLAMA_RETRY_INTERVAL_MS,
+  probeTimeoutMs: OLLAMA_PROBE_TIMEOUT_MS,
+};
+
+/** Probes `tagsUrl` until Ollama answers at the network level or the wait
+ * budget runs out, returning the first response it gets. Only a failure to
+ * connect at all is retried — any HTTP response, error status included, is
+ * returned to the caller as-is, because a running Ollama that answers badly
+ * is a real problem, not a slow start. Each probe's own timeout is clamped to
+ * what is left of the budget, so a black-holed endpoint cannot stretch the
+ * total past it. Throws the last connection error once the budget is spent. */
+async function waitForOllama(tagsUrl, deps = {}) {
+  const { fetchImpl, sleep, now, log, waitTimeoutMs, retryIntervalMs, probeTimeoutMs } = {
+    ...DEFAULT_OLLAMA_DEPS,
+    ...deps,
+  };
+  const deadline = now() + waitTimeoutMs;
+  let announced = false;
+
+  for (;;) {
+    const remaining = Math.max(1, deadline - now());
+    try {
+      return await fetchImpl(tagsUrl, { timeoutMs: Math.min(probeTimeoutMs, remaining) });
+    } catch (err) {
+      if (now() + retryIntervalMs >= deadline) throw err;
+      if (!announced) {
+        announced = true;
+        log(
+          `[code-index] Ollama is not reachable yet at ${new URL(tagsUrl).origin} — waiting up to ` +
+            `${Math.round(waitTimeoutMs / 1000)} s in case it is still starting...`,
+        );
+      }
+      await sleep(retryIntervalMs);
+    }
+  }
+}
+
+/** Returns OLLAMA_READY, OLLAMA_UNREACHABLE or OLLAMA_FAILED — see the
+ * constants' comment for what each one means to main(). */
+async function checkOllama(env, serverDir, deps = {}) {
+  const log = deps.log || DEFAULT_OLLAMA_DEPS.log;
   const endpoint = resolveEmbeddingSetting(env, 'Endpoint', 'http://localhost:11434', serverDir);
   const model = resolveEmbeddingSetting(env, 'Model', 'qwen3-embedding:4b', serverDir);
   const tagsUrl = new URL('/api/tags', endpoint).toString();
 
   let response;
   try {
-    response = await fetchWithTimeout(tagsUrl, OLLAMA_PROBE_TIMEOUT_MS);
+    response = await waitForOllama(tagsUrl, deps);
   } catch {
-    logError(
-      `[code-index] Cannot reach Ollama at ${endpoint}.`,
+    log(
+      `[code-index] Cannot reach Ollama at ${endpoint} — starting the server anyway.`,
       '',
-      '[code-index] code-index-mcp needs Ollama running locally to compute embeddings.',
-      '[code-index] Start it with:',
+      '[code-index] Symbol search works from the existing index; semantic ranking and re-indexing',
+      '[code-index] resume on their own with the first query after Ollama comes up. Start it with:',
       '',
       '  ollama serve',
-      '',
-      '[code-index] Then ask your question again.',
     );
-    return false;
+    return OLLAMA_UNREACHABLE;
   }
 
   if (!response.ok) {
-    logError(
+    log(
       `[code-index] Ollama at ${endpoint} responded with ${response.status} ${response.statusText} for /api/tags.`,
       '[code-index] Make sure Ollama is healthy (`ollama serve`) and try again.',
     );
-    return false;
+    return OLLAMA_FAILED;
   }
 
   let body;
   try {
     body = await response.json();
   } catch {
-    logError(`[code-index] Ollama at ${endpoint} returned a response /api/tags could not parse as JSON.`);
-    return false;
+    log(`[code-index] Ollama at ${endpoint} returned a response /api/tags could not parse as JSON.`);
+    return OLLAMA_FAILED;
   }
 
   const models = Array.isArray(body.models) ? body.models : [];
   const pulled = models.some((m) => m && (m.name === model || m.model === model));
 
   if (!pulled) {
-    logError(
+    log(
       `[code-index] Ollama is running, but model '${model}' is not pulled yet.`,
       '',
       '[code-index] Pull it (about 2.5 GB, one-time download):',
@@ -348,10 +418,10 @@ async function checkOllama(env, serverDir) {
       '',
       '[code-index] Then ask your question again.',
     );
-    return false;
+    return OLLAMA_FAILED;
   }
 
-  return true;
+  return OLLAMA_READY;
 }
 
 // ── Server binary: fetch from a GitHub Release, cache, verify ───────────────
@@ -1005,14 +1075,14 @@ async function main() {
   // wouldn't have needed anyway.
   const serverDir = await ensureServerInstalled();
 
-  let ollamaOk;
+  let ollamaState;
   try {
-    ollamaOk = await checkOllama(env, serverDir);
+    ollamaState = await checkOllama(env, serverDir);
   } catch (err) {
     logError(`[code-index] ${err.message}`);
     throw new LauncherExit(2);
   }
-  if (!ollamaOk) throw new LauncherExit(2);
+  if (ollamaState === OLLAMA_FAILED) throw new LauncherExit(2);
 
   runServer(env, serverDir);
 }
@@ -1076,4 +1146,11 @@ module.exports = {
   UNSET_PLACEHOLDER_RE,
   buildChildEnv,
   CONFIG_PATH,
+  waitForOllama,
+  checkOllama,
+  OLLAMA_READY,
+  OLLAMA_UNREACHABLE,
+  OLLAMA_FAILED,
+  OLLAMA_WAIT_TIMEOUT_MS,
+  OLLAMA_RETRY_INTERVAL_MS,
 };
